@@ -4,7 +4,7 @@ Spotunnel is a Debian setup script that runs Spotify desktop headlessly and rest
 
 ## Purpose
 
-Most android ad-blocking methods have been mitigated by spotify or are unreliable/slow however desktop ad-blocking has been so far unaffected, this script bridges the gap and lets you listen to desktop spotify on your phone.
+Most android adblocking methods have been mitigated by spotify or are unreliable/slow however desktop adblocking has been so far unaffected, this script bridges the gap and lets you listen to desktop spotify on your phone.
 
 ## How It Works
 
@@ -28,7 +28,7 @@ You are responsible for remote access (for example Tailscale, Cloudflare Tunnel,
 2. Run the setup script:
 
 ```bash
-bash <(wget -qO- http://...)
+bash <(wget -qO- https://raw.githubusercontent.com/0belous/Spotunnel/refs/heads/main/setup.sh)
 ```
 
 3. When prompted, choose an Opus bitrate (default: `128k`).

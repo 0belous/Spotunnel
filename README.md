@@ -31,11 +31,13 @@ You are responsible for remote access (for example Tailscale, Cloudflare Tunnel,
 bash <(wget -qO- https://raw.githubusercontent.com/0belous/Spotunnel/refs/heads/main/setup.sh)
 ```
 
+> If you already have spotunnel installed, running the setup script again will update it/reinstall to fix errors
+
 3. When prompted, choose an Opus bitrate (default: `128k`).
 4. Check the service logs to get the Spotify login QR code/URL:
 
 ```bash
-journalctl -u spotify-headless
+journalctl -u spotify-headless -n 200 -f -o cat
 ```
 
 5. Log in, then select Spotunnel in Spotify Connect.

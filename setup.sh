@@ -164,6 +164,7 @@ start_ffmpeg() {
         -f ogg icecast://source:hackme@localhost:8000/spotify.ogg \
         > /tmp/ffmpeg.log 2>&1 &
     FFMPEG_PID=\$!
+    FFMPEG_START_TIME=\$(date +%s)
 }
 
 trap cleanup SIGINT SIGTERM
@@ -174,10 +175,20 @@ if ! pgrep -f "Xvfb \$DISPLAY_VAL" > /dev/null; then
 fi
 
 FFMPEG_PID=""
+FFMPEG_START_TIME=0
 spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote > /dev/null 2>&1 &
 QR_SHOWN=0
 while true; do
     ensure_audio_stack
+    
+    CURRENT_TIME=\$(date +%s)
+    if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
+        if [ \$(( CURRENT_TIME - FFMPEG_START_TIME )) -ge 3600 ]; then
+            kill \$FFMPEG_PID 2>/dev/null || true
+            start_ffmpeg || true
+        fi
+    fi
+
     if [ -z "\${FFMPEG_PID}" ] || ! kill -0 \$FFMPEG_PID 2>/dev/null; then
         start_ffmpeg || true
     fi
@@ -276,14 +287,19 @@ install_common_dependencies() {
     run_task_cmd "Add Spotify repository" "echo 'deb https://repository.spotify.com stable non-free' > /etc/apt/sources.list.d/spotify.list"
     run_task "APT update" apt-get update
     run_task "Install Spotify" apt-get install -y --reinstall spotify-client
-    run_task_cmd "Patch Spotify (SpotX)" "bash <(curl -sSL https://raw.githubusercontent.com/SpotX-Official/SpotX-Bash/main/spotx.sh)"
+    run_task_cmd "Patch Spotify (SpotX)" "bash <(curl -sSL https://raw.githubusercontent.com/SpotX-Official/SpotX-Bash/main/spotx.sh) -f"
     run_task_cmd "Create spotifydaemon user" "useradd -m -G audio,video spotifydaemon 2>/dev/null || true"
+    run_task_cmd "Ensure spotifydaemon groups" "usermod -aG audio,video spotifydaemon 2>/dev/null || true"
 }
 
 start_host_services() {
     run_task "Reload systemd daemon" systemctl daemon-reload
     run_task "Enable services" systemctl enable icecast2 spotify-headless
     run_task "Restart services" systemctl restart icecast2 spotify-headless
+}
+
+restart_docker_processes() {
+    run_task_cmd "Restart running processes" "pkill -f spotify-run.sh || true; pkill spotify || true; pkill ffmpeg || true"
 }
 
 print_host_next_steps() {

@@ -94,6 +94,36 @@ http://<host-ip>:8000/spotify.ogg
 
 If you want a different Opus bitrate, pass `--build-arg OPUS_BITRATE=192k` to `docker build`.
 
+## Updating
+
+**Container / Host:**
+
+Re-run setup script:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/0belous/Spotunnel/refs/heads/main/setup.sh)
+```
+
+**Docker:**
+
+1. Pull changes
+```bash
+cd Spotunnel
+git pull
+```
+
+2. Stop and remove the old container
+```bash
+docker stop spotunnel
+docker rm spotunnel
+```
+
+3. Rebuild and run the container
+```bash
+docker build -t spotunnel .
+docker run -d --name spotunnel -p 8000:8000 spotunnel
+```
+
 ## Notes
 
 - The service user is `spotifydaemon`.

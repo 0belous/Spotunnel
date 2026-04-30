@@ -51,7 +51,7 @@ journalctl -u spotify-headless -n 200 -f -o cat
 ```
 
 5. Log in, then select Spotunnel in Spotify Connect.
-6. Open the stream in [Transistor](https://f-droid.org/en/packages/org.y20k.transistor):
+6. Open the stream in [VLC](https://play.google.com/store/apps/details?id=org.videolan.vlc):
 
 ```
 http://<server-ip>:8000/spotify.ogg

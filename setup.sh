@@ -148,6 +148,24 @@ ensure_audio_stack() {
     pactl set-default-sink SpotifySink > /dev/null 2>&1 || true
 }
 
+detect_zero_sound_level() {
+    if ! pactl list short sources 2>/dev/null | grep -q '^.*SpotifySink\.monitor'; then
+        return 1
+    fi
+
+    local probe_output
+    probe_output=$(ffmpeg -nostdin -hide_banner -loglevel info \
+        -f pulse -i SpotifySink.monitor \
+        -t 2 -af silencedetect=noise=0.000001:d=1 \
+        -f null - 2>&1 || true)
+
+    if printf '%s\n' "$probe_output" | grep -q 'silence_start:'; then
+        return 0
+    fi
+
+    return 1
+}
+
 start_ffmpeg() {
     wait_for_icecast || return 1
 
@@ -167,6 +185,16 @@ start_ffmpeg() {
     FFMPEG_START_TIME=\$(date +%s)
 }
 
+restart_ffmpeg() {
+    if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
+        kill \$FFMPEG_PID 2>/dev/null || true
+        wait \$FFMPEG_PID 2>/dev/null || true
+    fi
+
+    FFMPEG_PID=""
+    start_ffmpeg || true
+}
+
 trap cleanup SIGINT SIGTERM
 ensure_audio_stack
 if ! pgrep -f "Xvfb \$DISPLAY_VAL" > /dev/null; then
@@ -176,6 +204,8 @@ fi
 
 FFMPEG_PID=""
 FFMPEG_START_TIME=0
+RESTART_PENDING=0
+SILENCE_SINCE=0
 spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote > /dev/null 2>&1 &
 QR_SHOWN=0
 while true; do
@@ -184,8 +214,21 @@ while true; do
     CURRENT_TIME=\$(date +%s)
     if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
         if [ \$(( CURRENT_TIME - FFMPEG_START_TIME )) -ge 3600 ]; then
-            kill \$FFMPEG_PID 2>/dev/null || true
-            start_ffmpeg || true
+            RESTART_PENDING=1
+        fi
+    fi
+
+    if [ \$RESTART_PENDING -eq 1 ]; then
+        if detect_zero_sound_level; then
+            if [ \$SILENCE_SINCE -eq 0 ]; then
+                SILENCE_SINCE=\$CURRENT_TIME
+            elif [ \$(( CURRENT_TIME - SILENCE_SINCE )) -ge 60 ]; then
+                restart_ffmpeg
+                RESTART_PENDING=0
+                SILENCE_SINCE=0
+            fi
+        else
+            SILENCE_SINCE=0
         fi
     fi
 

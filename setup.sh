@@ -159,7 +159,7 @@ detect_zero_sound_level() {
         -t 2 -af silencedetect=noise=0.000001:d=1 \
         -f null - 2>&1 || true)
 
-    if printf '%s\n' "$probe_output" | grep -q 'silence_start:'; then
+    if printf '%s\n' "\$probe_output" | grep -q 'silence_start:'; then
         return 0
     fi
 

@@ -204,7 +204,6 @@ fi
 
 FFMPEG_PID=""
 FFMPEG_START_TIME=0
-RESTART_PENDING=0
 SILENCE_SINCE=0
 spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote > /dev/null 2>&1 &
 QR_SHOWN=0
@@ -213,23 +212,18 @@ while true; do
     
     CURRENT_TIME=\$(date +%s)
     if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
-        if [ \$(( CURRENT_TIME - FFMPEG_START_TIME )) -ge 3600 ]; then
-            RESTART_PENDING=1
-        fi
-    fi
-
-    if [ \$RESTART_PENDING -eq 1 ]; then
         if detect_zero_sound_level; then
             if [ \$SILENCE_SINCE -eq 0 ]; then
                 SILENCE_SINCE=\$CURRENT_TIME
             elif [ \$(( CURRENT_TIME - SILENCE_SINCE )) -ge 60 ]; then
                 restart_ffmpeg
-                RESTART_PENDING=0
                 SILENCE_SINCE=0
             fi
         else
             SILENCE_SINCE=0
         fi
+    else
+        SILENCE_SINCE=0
     fi
 
     if [ -z "\${FFMPEG_PID}" ] || ! kill -0 \$FFMPEG_PID 2>/dev/null; then

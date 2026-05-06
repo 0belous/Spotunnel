@@ -98,7 +98,13 @@ If you want a different Opus bitrate, pass `--build-arg OPUS_BITRATE=192k` to `d
 
 **Container / Host:**
 
-Re-run setup script:
+Run setup with update flag
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/0belous/Spotunnel/refs/heads/main/setup.sh) --update
+```
+
+If there have been major changes to this project since the last time you installed you might have to run the full setup script:
 
 ```bash
 bash <(wget -qO- https://raw.githubusercontent.com/0belous/Spotunnel/refs/heads/main/setup.sh)

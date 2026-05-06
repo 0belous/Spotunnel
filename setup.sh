@@ -4,15 +4,18 @@ set -euo pipefail
 LOG_FILE="/var/log/spotunnel-setup.log"
 MODE="host"
 PREPARE_ONLY=0
+UPDATE_ONLY=0
 OPUS_BITRATE="${OPUS_BITRATE:-}"
+SETUP_SCRIPT_VERSION="1"
 
 usage() {
     cat << 'EOF'
-Usage: setup.sh [--mode host|docker] [--bitrate 128k] [--prepare-only]
+Usage: setup.sh [--mode host|docker] [--bitrate 128k] [--prepare-only] [--update]
 
 --mode host|docker    Select host install or Docker image preparation.
 --bitrate VALUE       Set the Opus bitrate used by FFmpeg.
 --prepare-only        Skip service startup and only prepare files.
+--update              Skip dependency install and only refresh runtime configuration.
 EOF
 }
 
@@ -28,6 +31,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --prepare-only|--no-start)
             PREPARE_ONLY=1
+            shift
+            ;;
+        --update)
+            UPDATE_ONLY=1
             shift
             ;;
         -h|--help)
@@ -90,6 +97,39 @@ resolve_opus_bitrate() {
         OPUS_BITRATE="${USER_BITRATE:-128k}"
     else
         OPUS_BITRATE="128k"
+    fi
+}
+
+read_version_file() {
+    local version_file="$(dirname "$(readlink -f "$0")")/version.txt"
+
+    if [[ ! -f "$version_file" ]]; then
+        echo "1"
+        return
+    fi
+
+    local file_version
+    file_version="$(tr -dc '0-9' < "$version_file" | head -c 1)"
+    if [[ -z "$file_version" ]]; then
+        echo "1"
+    else
+        echo "$file_version"
+    fi
+}
+
+validate_update_mode() {
+    if [[ "$UPDATE_ONLY" -eq 0 ]]; then
+        return
+    fi
+
+    local current_version
+    current_version="$(read_version_file)"
+
+    if [[ "$current_version" != "$SETUP_SCRIPT_VERSION" ]]; then
+        task_log "INFO" "Update requested, but version.txt=$current_version and script version=$SETUP_SCRIPT_VERSION differ. Running full setup."
+        UPDATE_ONLY=0
+    else
+        task_log "INFO" "Update mode enabled (version.txt=$current_version matches script version)."
     fi
 }
 
@@ -337,8 +377,15 @@ print_docker_next_steps() {
 
 export DEBIAN_FRONTEND=noninteractive
 task_log "INFO" "Spotunnel setup started in $MODE mode. Log: $LOG_FILE"
+validate_update_mode
 resolve_opus_bitrate
-install_common_dependencies
+
+if [[ "$UPDATE_ONLY" -eq 0 ]]; then
+    install_common_dependencies
+else
+    task_log "INFO" "Skipping dependency and Spotify install in update mode."
+fi
+
 write_pulseaudio_config
 write_spotify_runner
 

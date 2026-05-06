@@ -148,23 +148,7 @@ ensure_audio_stack() {
     pactl set-default-sink SpotifySink > /dev/null 2>&1 || true
 }
 
-detect_zero_sound_level() {
-    if ! pactl list short sources 2>/dev/null | grep -q '^.*SpotifySink\.monitor'; then
-        return 1
-    fi
 
-    local probe_output
-    probe_output=$(ffmpeg -nostdin -hide_banner -loglevel info \
-        -f pulse -i SpotifySink.monitor \
-        -t 2 -af silencedetect=noise=0.000001:d=1 \
-        -f null - 2>&1 || true)
-
-    if printf '%s\n' "\$probe_output" | grep -q 'silence_start:'; then
-        return 0
-    fi
-
-    return 1
-}
 
 start_ffmpeg() {
     wait_for_icecast || return 1
@@ -204,7 +188,6 @@ fi
 
 FFMPEG_PID=""
 FFMPEG_START_TIME=0
-SILENCE_SINCE=0
 spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote > /dev/null 2>&1 &
 QR_SHOWN=0
 while true; do
@@ -212,18 +195,10 @@ while true; do
     
     CURRENT_TIME=\$(date +%s)
     if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
-        if detect_zero_sound_level; then
-            if [ \$SILENCE_SINCE -eq 0 ]; then
-                SILENCE_SINCE=\$CURRENT_TIME
-            elif [ \$(( CURRENT_TIME - SILENCE_SINCE )) -ge 60 ]; then
-                restart_ffmpeg
-                SILENCE_SINCE=0
-            fi
-        else
-            SILENCE_SINCE=0
+        # 6-hour failsafe restart (21600 seconds) - ignoring unreliable silence detection
+        if [ \$(( CURRENT_TIME - FFMPEG_START_TIME )) -ge 21600 ]; then
+            restart_ffmpeg
         fi
-    else
-        SILENCE_SINCE=0
     fi
 
     if [ -z "\${FFMPEG_PID}" ] || ! kill -0 \$FFMPEG_PID 2>/dev/null; then

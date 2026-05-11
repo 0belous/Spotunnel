@@ -209,6 +209,12 @@ start_ffmpeg() {
     FFMPEG_START_TIME=\$(date +%s)
 }
 
+start_spotify() {
+    spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote > /dev/null 2>&1 &
+    SPOTIFY_PID=\$!
+    SPOTIFY_START_TIME=\$(date +%s)
+}
+
 restart_ffmpeg() {
     if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
         kill \$FFMPEG_PID 2>/dev/null || true
@@ -219,6 +225,19 @@ restart_ffmpeg() {
     start_ffmpeg || true
 }
 
+restart_spotify() {
+    if [ -n "\${SPOTIFY_PID}" ] && kill -0 \$SPOTIFY_PID 2>/dev/null; then
+        kill \$SPOTIFY_PID 2>/dev/null || true
+        wait \$SPOTIFY_PID 2>/dev/null || true
+    fi
+
+    SPOTIFY_PID=""
+    SPOTIFY_START_TIME=0
+
+    restart_ffmpeg
+    start_spotify
+}
+
 trap cleanup SIGINT SIGTERM
 ensure_audio_stack
 if ! pgrep -f "Xvfb \$DISPLAY_VAL" > /dev/null; then
@@ -226,16 +245,23 @@ if ! pgrep -f "Xvfb \$DISPLAY_VAL" > /dev/null; then
     sleep 2
 fi
 
+SPOTIFY_PID=""
+SPOTIFY_START_TIME=0
 FFMPEG_PID=""
 FFMPEG_START_TIME=0
-spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote > /dev/null 2>&1 &
+start_spotify
 QR_SHOWN=0
 while true; do
     ensure_audio_stack
     
     CURRENT_TIME=\$(date +%s)
+    if [ -n "\${SPOTIFY_PID}" ] && kill -0 \$SPOTIFY_PID 2>/dev/null; then
+        if [ \$(( CURRENT_TIME - SPOTIFY_START_TIME )) -ge 21600 ]; then
+            restart_spotify
+        fi
+    fi
+
     if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
-        # 6-hour failsafe restart (21600 seconds) - ignoring unreliable silence detection
         if [ \$(( CURRENT_TIME - FFMPEG_START_TIME )) -ge 21600 ]; then
             restart_ffmpeg
         fi

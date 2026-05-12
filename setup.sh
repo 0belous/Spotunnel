@@ -201,12 +201,11 @@ start_ffmpeg() {
 
     ffmpeg -nostdin -y \
         -f pulse -i SpotifySink.monitor \
-        -c:a libopus -b:a ${OPUS_BITRATE} \
-        -content_type audio/ogg \
-        -f ogg icecast://source:hackme@localhost:8000/spotify.ogg \
+        -c:a libmp3lame -b:a ${OPUS_BITRATE} \
+        -content_type audio/mpeg \
+        -f mp3 icecast://source:hackme@localhost:8000/spotify.mp3 \
         > /tmp/ffmpeg.log 2>&1 &
     FFMPEG_PID=\$!
-    FFMPEG_START_TIME=\$(date +%s)
 }
 
 start_spotify() {
@@ -232,7 +231,6 @@ restart_spotify() {
     fi
 
     SPOTIFY_PID=""
-    SPOTIFY_START_TIME=0
 
     restart_ffmpeg
     start_spotify
@@ -246,25 +244,27 @@ if ! pgrep -f "Xvfb \$DISPLAY_VAL" > /dev/null; then
 fi
 
 SPOTIFY_PID=""
-SPOTIFY_START_TIME=0
 FFMPEG_PID=""
-FFMPEG_START_TIME=0
+ZERO_LISTENER_START_TIME=0
 start_spotify
 QR_SHOWN=0
 while true; do
     ensure_audio_stack
     
-    CURRENT_TIME=\$(date +%s)
-    if [ -n "\${SPOTIFY_PID}" ] && kill -0 \$SPOTIFY_PID 2>/dev/null; then
-        if [ \$(( CURRENT_TIME - SPOTIFY_START_TIME )) -ge 21600 ]; then
-            restart_spotify
+    LISTENER_COUNT=\$(curl -fsS http://localhost:8000/status-json.xsl 2>/dev/null | grep -o '"listeners":[0-9]*' | grep -o '[0-9]*' || echo "0")
+    
+    if [ "\$LISTENER_COUNT" = "0" ]; then
+        if [ \$ZERO_LISTENER_START_TIME -eq 0 ]; then
+            ZERO_LISTENER_START_TIME=\$(date +%s)
+        else
+            CURRENT_TIME=\$(date +%s)
+            if [ \$(( CURRENT_TIME - ZERO_LISTENER_START_TIME )) -ge 300 ]; then
+                restart_spotify
+                ZERO_LISTENER_START_TIME=0
+            fi
         fi
-    fi
-
-    if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
-        if [ \$(( CURRENT_TIME - FFMPEG_START_TIME )) -ge 21600 ]; then
-            restart_ffmpeg
-        fi
+    else
+        ZERO_LISTENER_START_TIME=0
     fi
 
     if [ -z "\${FFMPEG_PID}" ] || ! kill -0 \$FFMPEG_PID 2>/dev/null; then
@@ -387,7 +387,7 @@ print_host_next_steps() {
     echo "   journalctl -u spotify-headless -n 200 -f -o cat"
     echo ""
     echo "2. Open VLC Network Stream (or any media player) and connect here:"
-    echo "   http://${IP_ADDR}:8000/spotify.ogg"
+    echo "   http://${IP_ADDR}:8000/spotify.mp3"
     echo ""
 }
 

@@ -54,7 +54,7 @@ journalctl -u spotify-headless -n 200 -f -o cat
 6. Open the stream in [VLC](https://play.google.com/store/apps/details?id=org.videolan.vlc):
 
 ```
-http://<server-ip>:8000/spotify.ogg
+http://<server-ip>:8000/spotify.mp3
 ```
 
 If you want access outside your local network, publish or tunnel this URL yourself.
@@ -89,7 +89,7 @@ docker logs -f spotunnel
 6. Open the stream in VLC or another player:
 
 ```text
-http://<host-ip>:8000/spotify.ogg
+http://<host-ip>:8000/spotify.mp3
 ```
 
 If you want a different Opus bitrate, pass `--build-arg OPUS_BITRATE=192k` to `docker build`.

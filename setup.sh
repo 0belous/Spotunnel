@@ -188,28 +188,18 @@ ensure_audio_stack() {
     pactl set-default-sink SpotifySink > /dev/null 2>&1 || true
 }
 
-
-
 start_ffmpeg() {
     wait_for_icecast || return 1
-
     ensure_audio_stack
-
     if ! pactl list short sources 2>/dev/null | grep -q '^.*SpotifySink\.monitor'; then
         return 1
     fi
-
-    ffmpeg -nostdin -y \
-        -f pulse -i SpotifySink.monitor \
-        -c:a libmp3lame -b:a ${OPUS_BITRATE} \
-        -content_type audio/mpeg \
-        -f mp3 icecast://source:hackme@localhost:8000/spotify.mp3 \
-        > /tmp/ffmpeg.log 2>&1 &
+    ffmpeg -nostdin -y -f pulse -i SpotifySink.monitor -c:a libmp3lame -b:a ${OPUS_BITRATE} -content_type audio/mpeg -f mp3 icecast://source:hackme@localhost:8000/spotify.mp3 > /tmp/ffmpeg.log 2>&1 &
     FFMPEG_PID=\$!
 }
 
 start_spotify() {
-    spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote > /dev/null 2>&1 &
+    spotify --disable-gpu --disable-software-rasterizer --no-sandbox --no-zygote --force-device-scale-factor=1.28 > /dev/null 2>&1 &
     SPOTIFY_PID=\$!
     SPOTIFY_START_TIME=\$(date +%s)
 }
@@ -219,7 +209,6 @@ restart_ffmpeg() {
         kill \$FFMPEG_PID 2>/dev/null || true
         wait \$FFMPEG_PID 2>/dev/null || true
     fi
-
     FFMPEG_PID=""
     start_ffmpeg || true
 }
@@ -229,9 +218,7 @@ restart_spotify() {
         kill \$SPOTIFY_PID 2>/dev/null || true
         wait \$SPOTIFY_PID 2>/dev/null || true
     fi
-
     SPOTIFY_PID=""
-
     restart_ffmpeg
     start_spotify
 }
@@ -239,8 +226,11 @@ restart_spotify() {
 trap cleanup SIGINT SIGTERM
 ensure_audio_stack
 if ! pgrep -f "Xvfb \$DISPLAY_VAL" > /dev/null; then
-    Xvfb \$DISPLAY_VAL -screen 0 1024x768x24 -ac +extension RANDR &
+    Xvfb \$DISPLAY_VAL -screen 0 720x1280x24 -ac +extension RANDR &
     sleep 2
+    x11vnc -display \$DISPLAY_VAL -forever -nopw -shared -rfbport 5900 -bg -noshm -geometry 720x1280 &
+    DISPLAY=\$DISPLAY_VAL matchbox-window-manager &
+    sleep 1
 fi
 
 SPOTIFY_PID=""
@@ -250,9 +240,7 @@ start_spotify
 QR_SHOWN=0
 while true; do
     ensure_audio_stack
-    
     LISTENER_COUNT=\$(curl -fsS http://localhost:8000/status-json.xsl 2>/dev/null | grep -o '"listeners":[0-9]*' | grep -o '[0-9]*' || echo "0")
-    
     if [ "\$LISTENER_COUNT" = "0" ]; then
         if [ \$ZERO_LISTENER_START_TIME -eq 0 ]; then
             ZERO_LISTENER_START_TIME=\$(date +%s)
@@ -360,7 +348,8 @@ install_common_dependencies() {
     run_task "APT update" apt-get update
     run_task "APT upgrade" apt-get upgrade -y
     run_task_cmd "Preconfigure icecast2" "echo 'icecast2 icecast2/icecast-setup boolean false' | debconf-set-selections"
-    run_task "Install dependencies" apt-get install -y --reinstall curl gnupg sudo xvfb scrot zbar-tools qrencode pulseaudio ffmpeg icecast2 dbus-x11 unzip zip
+    # Added x11vnc and matchbox-window-manager
+    run_task "Install dependencies" apt-get install -y --reinstall curl gnupg sudo xvfb scrot zbar-tools qrencode pulseaudio ffmpeg icecast2 dbus-x11 unzip zip x11vnc matchbox-window-manager
     run_task_cmd "Install Spotify signing key" "curl -sS https://download.spotify.com/debian/pubkey_5384CE82BA52C83A.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/spotify.gpg"
     run_task_cmd "Add Spotify repository" "echo 'deb https://repository.spotify.com stable non-free' > /etc/apt/sources.list.d/spotify.list"
     run_task "APT update" apt-get update
@@ -388,6 +377,8 @@ print_host_next_steps() {
     echo ""
     echo "2. Open VLC Network Stream (or any media player) and connect here:"
     echo "   http://${IP_ADDR}:8000/spotify.mp3"
+    echo ""
+    echo "3. Optionally connect to VNC on port 5900"
     echo ""
 }
 

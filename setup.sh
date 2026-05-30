@@ -204,6 +204,14 @@ start_spotify() {
     SPOTIFY_START_TIME=\$(date +%s)
 }
 
+request_system_reboot() {
+    if command -v sudo >/dev/null 2>&1; then
+        sudo -n /usr/local/bin/spotunnel-system-reboot.sh >/dev/null 2>&1 || true
+    else
+        /usr/local/bin/spotunnel-system-reboot.sh >/dev/null 2>&1 || true
+    fi
+}
+
 restart_ffmpeg() {
     if [ -n "\${FFMPEG_PID}" ] && kill -0 \$FFMPEG_PID 2>/dev/null; then
         kill \$FFMPEG_PID 2>/dev/null || true
@@ -241,14 +249,15 @@ QR_SHOWN=0
 while true; do
     ensure_audio_stack
     LISTENER_COUNT=\$(curl -fsS http://localhost:8000/status-json.xsl 2>/dev/null | grep -o '"listeners":[0-9]*' | grep -o '[0-9]*' || echo "0")
+    echo "Listener count: \${LISTENER_COUNT}"
     if [ "\$LISTENER_COUNT" = "0" ]; then
         if [ \$ZERO_LISTENER_START_TIME -eq 0 ]; then
             ZERO_LISTENER_START_TIME=\$(date +%s)
         else
             CURRENT_TIME=\$(date +%s)
             if [ \$(( CURRENT_TIME - ZERO_LISTENER_START_TIME )) -ge 300 ]; then
-                restart_spotify
-                ZERO_LISTENER_START_TIME=0
+                request_system_reboot
+                ZERO_LISTENER_START_TIME=$(date +%s)
             fi
         fi
     else
@@ -299,6 +308,29 @@ EOF
 
     run_task "Install systemd service" install -o root -g root -m 644 "$TMP_SPOTIFY_SERVICE" /etc/systemd/system/spotify-headless.service
     run_task "Cleanup temporary files" rm -f "$TMP_SPOTIFY_SERVICE"
+}
+
+write_reboot_helper() {
+    task_log "RUN" "Write system reboot helper"
+    cat << 'EOF' > /usr/local/bin/spotunnel-system-reboot.sh
+#!/bin/bash
+set -euo pipefail
+
+logger -t spotunnel "Zero listeners detected for 30 minutes; rebooting host"
+sync
+systemctl reboot --force --force || reboot -f
+EOF
+    task_log "DONE" "Write system reboot helper"
+    run_task "Install system reboot helper" chmod 755 /usr/local/bin/spotunnel-system-reboot.sh
+}
+
+write_reboot_sudoers() {
+    task_log "RUN" "Write reboot sudoers rule"
+    cat << 'EOF' > /etc/sudoers.d/spotunnel-reboot
+spotifydaemon ALL=(root) NOPASSWD: /usr/local/bin/spotunnel-system-reboot.sh
+EOF
+    task_log "DONE" "Write reboot sudoers rule"
+    run_task "Set sudoers permissions" chmod 440 /etc/sudoers.d/spotunnel-reboot
 }
 
 write_docker_entrypoint() {
@@ -408,6 +440,8 @@ write_spotify_runner
 
 if [[ "$MODE" == "host" ]]; then
     write_systemd_service
+    write_reboot_helper
+    write_reboot_sudoers
 fi
 
 if [[ "$MODE" == "docker" ]]; then

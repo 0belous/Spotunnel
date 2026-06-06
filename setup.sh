@@ -155,6 +155,13 @@ set -u
 
 DISPLAY_VAL=":99"
 export DISPLAY=\$DISPLAY_VAL
+MEM_GUARD_LIMIT_MB="\${SPOTIFY_MAX_RSS_MB:-1200}"
+LISTENER_RESTART_SECONDS="\${SPOTIFY_ZERO_LISTENER_RESTART_SEC:-300}"
+SPOTIFY_RESTART_COOLDOWN="\${SPOTIFY_RESTART_COOLDOWN_SEC:-90}"
+
+log() {
+    echo "[spotunnel] \$*"
+}
 
 wait_for_icecast() {
     local tries=0
@@ -205,11 +212,38 @@ start_spotify() {
 }
 
 request_system_reboot() {
-    if command -v sudo >/dev/null 2>&1; then
-        sudo -n /usr/local/bin/spotunnel-system-reboot.sh >/dev/null 2>&1 || true
-    else
-        /usr/local/bin/spotunnel-system-reboot.sh >/dev/null 2>&1 || true
+    if [ ! -x /usr/local/bin/spotunnel-system-reboot.sh ]; then
+        return 1
     fi
+
+    if command -v sudo >/dev/null 2>&1; then
+        sudo -n /usr/local/bin/spotunnel-system-reboot.sh >/dev/null 2>&1
+    else
+        /usr/local/bin/spotunnel-system-reboot.sh >/dev/null 2>&1
+    fi
+}
+
+spotify_rss_mb() {
+    local spotify_pid="\$1"
+    local rss_kb
+    rss_kb=\$(ps -o rss= -p "\$spotify_pid" 2>/dev/null | tr -d '[:space:]')
+    if [ -z "\$rss_kb" ]; then
+        echo "0"
+        return
+    fi
+    echo \$((rss_kb / 1024))
+}
+
+can_restart_spotify() {
+    local now
+    now=\$(date +%s)
+    if [ \$LAST_SPOTIFY_RESTART_TIME -eq 0 ]; then
+        return 0
+    fi
+    if [ \$(( now - LAST_SPOTIFY_RESTART_TIME )) -lt \$SPOTIFY_RESTART_COOLDOWN ]; then
+        return 1
+    fi
+    return 0
 }
 
 restart_ffmpeg() {
@@ -222,6 +256,9 @@ restart_ffmpeg() {
 }
 
 restart_spotify() {
+    local now
+    now=\$(date +%s)
+
     if [ -n "\${SPOTIFY_PID}" ] && kill -0 \$SPOTIFY_PID 2>/dev/null; then
         kill \$SPOTIFY_PID 2>/dev/null || true
         wait \$SPOTIFY_PID 2>/dev/null || true
@@ -229,6 +266,7 @@ restart_spotify() {
     SPOTIFY_PID=""
     restart_ffmpeg
     start_spotify
+    LAST_SPOTIFY_RESTART_TIME=\$now
 }
 
 trap cleanup SIGINT SIGTERM
@@ -244,10 +282,21 @@ fi
 SPOTIFY_PID=""
 FFMPEG_PID=""
 ZERO_LISTENER_START_TIME=0
+LAST_SPOTIFY_RESTART_TIME=0
 start_spotify
 QR_SHOWN=0
 while true; do
     ensure_audio_stack
+    if [ -n "\${SPOTIFY_PID}" ] && kill -0 \$SPOTIFY_PID 2>/dev/null; then
+        SPOTIFY_RSS_MB=\$(spotify_rss_mb "\$SPOTIFY_PID")
+        if [ "\$SPOTIFY_RSS_MB" -ge "\$MEM_GUARD_LIMIT_MB" ]; then
+            if can_restart_spotify; then
+                log "Spotify RSS \${SPOTIFY_RSS_MB}MB crossed limit \${MEM_GUARD_LIMIT_MB}MB; restarting Spotify"
+                restart_spotify
+            fi
+        fi
+    fi
+
     LISTENER_COUNT=\$(curl -fsS http://localhost:8000/status-json.xsl 2>/dev/null | grep -o '"listeners":[0-9]*' | grep -o '[0-9]*' || echo "0")
     echo "Listener count: \${LISTENER_COUNT}"
     if [ "\$LISTENER_COUNT" = "0" ]; then
@@ -255,9 +304,17 @@ while true; do
             ZERO_LISTENER_START_TIME=\$(date +%s)
         else
             CURRENT_TIME=\$(date +%s)
-            if [ \$(( CURRENT_TIME - ZERO_LISTENER_START_TIME )) -ge 300 ]; then
-                request_system_reboot
-                ZERO_LISTENER_START_TIME=$(date +%s)
+            if [ \$(( CURRENT_TIME - ZERO_LISTENER_START_TIME )) -ge \$LISTENER_RESTART_SECONDS ]; then
+                if can_restart_spotify; then
+                    log "Zero listeners for \${LISTENER_RESTART_SECONDS}s; restarting Spotify pipeline"
+                    restart_spotify
+                fi
+
+                if ! request_system_reboot; then
+                    log "Reboot helper unavailable/failed; recovered by process restart only"
+                fi
+
+                ZERO_LISTENER_START_TIME=\$(date +%s)
             fi
         fi
     else
@@ -316,7 +373,7 @@ write_reboot_helper() {
 #!/bin/bash
 set -euo pipefail
 
-logger -t spotunnel "Zero listeners detected for 30 minutes; rebooting host"
+logger -t spotunnel "Zero-listener threshold reached; rebooting host"
 sync
 systemctl reboot --force --force || reboot -f
 EOF
